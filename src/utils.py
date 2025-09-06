@@ -5,16 +5,13 @@ import os
 from nltk.stem import WordNetLemmatizer
 import nltk  # Natural Language Toolkit
 from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
 import string
 import re
 
 # Download stopwords if not already done
 nltk.download('stopwords')
 nltk.download('punkt')
-nltk.download('wordnet')
-nltk.download('omw-1.4')
-stop_words = set(stopwords.words('english'))
-lemmatizer = WordNetLemmatizer()
 
 
 def build_dataset(file_path):
@@ -170,46 +167,19 @@ def correlation_tags_difficulty(dataset, valid_tags):
     return correlation
 
 
-def get_clean_text(text):
-    """
-    Cleans the input text by removing extra spaces and newlines.
+def clean_text(text):
+    # Remove anything between $$$
+    cleaned_text = re.sub(r'\$\$\$.*?\$\$\$', '', text)
+    # Keep only alphanumeric characters and spaces
+    cleaned_text = re.sub(r'[^\w\s]', ' ', cleaned_text)
+    cleaned_text = re.sub(r'\d+', '', cleaned_text)  # Remove digits
 
-    Args:
-        text (str): The input text to be cleaned.
+    tokens = word_tokenize(cleaned_text)
 
-    Returns:
-        str: The cleaned text.
-    """"""
-    Cleans text for TF-IDF vectorization.
+    stop_words = set(stopwords.words('english'))
+    cleaned_tokens = [word for word in tokens if word.lower()
+                      not in stop_words]
 
-    Steps:
-    - Lowercasing
-    - Remove HTML tags, URLs, and non-alphanumeric chars
-    - Remove numbers
-    - Remove punctuation
-    - Tokenize and remove stopwords
-    """
-    # Lowercase
-    text = text.lower()
+    cleaned_text = ' '.join(cleaned_tokens)
 
-    # Remove HTML tags
-    text = re.sub(r"<.*?>", " ", text)
-
-    # Remove URLs
-    text = re.sub(r"http\S+|www\S+|https\S+", " ", text)
-
-    # Remove numbers
-    text = re.sub(r"\d+", " ", text)
-
-    # Remove punctuation
-    text = text.translate(str.maketrans("", "", string.punctuation))
-    # tokenization
-    tokens = nltk.word_tokenize(text)
-    # Remove stopwords
-    tokens = [word for word in tokens if word not in stop_words]
-
-    # lemmatization can be added here if needed
-    tokens = [lemmatizer.lemmatize(word) for word in tokens]
-
-    # Join back into string
-    return " ".join(tokens)
+    return cleaned_text
