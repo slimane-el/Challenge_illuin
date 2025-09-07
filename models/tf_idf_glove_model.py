@@ -7,7 +7,7 @@ import numpy as np
 from gensim.models import word2vec
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import precision_score, recall_score, hamming_loss, f1_score
-from sklearn.model_selection import StratifiedGroupKFold
+from sklearn.model_selection import StratifiedKFold
 
 # import os to modify path if needed because utils is in ../src
 
@@ -94,23 +94,91 @@ def logistic_regression_by_label(X, y, threshold=0.5):
     Returns:
         dict: A dictionary mapping each label to its corresponding trained logistic regression model.
     """
-    num_classes = Y.shape[1]
+    num_classes = y.shape[1]
     models = {}
-    predictions = np.zeros((X.shape[0], num_classes))
-    true_labels = np.zeros((X.shape[0], num_classes))
+    all_predictions = []
+    all_true_labels = []
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42)
     for i in range(num_classes):
         model = LogisticRegression()
-        model.fit(X_train, y_train.iloc[:, i])
+        model.fit(X_train, y_train[:, i])
         models[i] = model
-        proba = model.predict_proba(X)[:, 1]
-        predictions[:, i] = (proba >= threshold).astype(int)
-        true_labels[:, i] = y.iloc[:, i]
-    return models, predictions, true_labels
+        proba = model.predict_proba(X_test)[:, 1]
+        predictions = (proba >= threshold).astype(int)
+        all_predictions.append(predictions)
+        all_true_labels.append(y_test[:, i])
+    return models, all_predictions, all_true_labels
 
 
-def crossvalidation_logistic_regression(X, y, thresholds=[0.3, 0.5, 0.7], num_folds=5):
+def random_forest_by_label(X, y, threshold=0.5):
+    """
+    Trains a random forest model for each unique label in the dataset using a threshold approach.
+
+    Args:
+        X (np.ndarray): The feature matrix.
+        y (pd.Series): The target labels.
+
+    Returns:
+        dict: A dictionary mapping each label to its corresponding trained random forest model.
+    """
+    from sklearn.ensemble import RandomForestClassifier
+    num_classes = y.shape[1]
+    models = {}
+    all_predictions = []
+    all_true_labels = []
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42)
+    for i in range(num_classes):
+        model = RandomForestClassifier()
+        model.fit(X_train, y_train[:, i])
+        models[i] = model
+        proba = model.predict_proba(X_test)[:, 1]
+        predictions = (proba >= threshold).astype(int)
+        all_predictions.append(predictions)
+        all_true_labels.append(y_test[:, i])
+    return models, all_predictions, all_true_labels
+
+
+def crossvalidation_random_forest(X, y, thresholds=[0.3, 0.4, 0.5, 0.6, 0.7], num_folds=5):
+    """
+    Performs cross-validation for random forest models with different thresholds.
+
+    Args:
+        X (np.ndarray): The feature matrix.
+        y (pd.DataFrame): The target labels.
+        thresholds (list): A list of thresholds to evaluate.
+
+    Returns:
+        dict: A dictionary mapping each threshold to its corresponding evaluation metrics.
+    """
+    skf = StratifiedKFold(n_splits=num_folds)
+    results = {thr: [] for thr in thresholds}
+    for train_index, test_index in skf.split(X, y.argmax(axis=1)):
+        X_train, X_test = X[train_index], X[test_index]
+        y_train, y_test = y[train_index], y[test_index]
+
+        for thr in thresholds:
+            models, preds, true_lbls = random_forest_by_label(
+                X_train, y_train, threshold=thr)
+            metrics = compute_metrics(true_lbls, preds)
+            results[thr].append(metrics)
+
+    avg_results = {}
+    for thr in thresholds:
+        avg_metrics = {
+            'precision': np.mean([res['precision'] for res in results[thr]]),
+            'recall': np.mean([res['recall'] for res in results[thr]]),
+            'f1_score': np.mean([res['f1_score'] for res in results[thr]]),
+            'hamming_loss': np.mean([res['hamming_loss'] for res in results[thr]])
+        }
+        avg_results[thr] = avg_metrics
+    best_threshold = min(
+        avg_results, key=lambda k: avg_results[k]['hamming_loss'])
+    return avg_results, best_threshold
+
+
+def crossvalidation_logistic_regression(X, y, thresholds=[0.3, 0.4, 0.5, 0.6, 0.7], num_folds=5):
     """
     Performs cross-validation for logistic regression models with different thresholds.
 
@@ -122,18 +190,16 @@ def crossvalidation_logistic_regression(X, y, thresholds=[0.3, 0.5, 0.7], num_fo
     Returns:
         dict: A dictionary mapping each threshold to its corresponding evaluation metrics.
     """
-    skf = StratifiedGroupKFold(n_splits=num_folds)
+    skf = StratifiedKFold(n_splits=num_folds)
     results = {thr: [] for thr in thresholds}
-    groups = np.arange(X.shape[0])  # Dummy groups for StratifiedGroupKFold
-
-    for train_index, test_index in skf.split(X, y.values.argmax(axis=1), groups):
+    for train_index, test_index in skf.split(X, y.argmax(axis=1)):
         X_train, X_test = X[train_index], X[test_index]
-        y_train, y_test = y.iloc[train_index], y.iloc[test_index]
+        y_train, y_test = y[train_index], y[test_index]
 
         for thr in thresholds:
             models, preds, true_lbls = logistic_regression_by_label(
                 X_train, y_train, threshold=thr)
-            metrics = compute_metrics(true_lbls[test_index], preds[test_index])
+            metrics = compute_metrics(true_lbls, preds)
             results[thr].append(metrics)
 
     avg_results = {}
@@ -184,14 +250,21 @@ def main():
     sentences = [[lemmatizer.lemmatize(word) for word in sentence]
                  for sentence in sentences]
     model = word2vec.Word2Vec(
-        sentences, vector_size=100, window=5, min_count=1, workers=4)
+        sentences, vector_size=25, window=5, min_count=1, sg=1, epochs=10)
     # TF-IDF and GloVe embeddings
     tf_idf_matrix, top_keywords = get_top_n_tf_idf(corpus, n=5)
     df["keywords"] = top_keywords
     df["embeddings"] = df["keywords"].apply(
         lambda words: get_glove_embeddings(words, model))
-    # testing shapes
-    print((df["embeddings"][0]), model.vector_size)
+    # flattening the embeddings
+    X = np.array([emb.flatten() for emb in df["embeddings"]])
+    print("Feature matrix shape:", X.shape)
+    y = np.array(df["binary_tags"].tolist())
+    # Cross-validation and model evaluation
+    results, best_threshold = crossvalidation_random_forest(
+        X, y, num_folds=5)
+    print("Cross-validation results:", results)
+    print("Best threshold based on Hamming Loss:", best_threshold)
 
 
 if __name__ == "__main__":
