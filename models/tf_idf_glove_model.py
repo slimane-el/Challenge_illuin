@@ -1,5 +1,6 @@
 from src.utils import build_dataset, clean_text
 import os
+import optuna
 import nltk
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
@@ -105,7 +106,7 @@ def logistic_regression_by_label(X, y, threshold=0.5):
         model.fit(X_train, y_train[:, i])
         models[i] = model
         proba = model.predict_proba(X_test)[:, 1]
-        predictions = (proba >= threshold).astype(int)
+        predictions = (proba >= threshold[i]).astype(int)
         all_predictions.append(predictions)
         all_true_labels.append(y_test[:, i])
     return models, all_predictions, all_true_labels
@@ -178,42 +179,15 @@ def crossvalidation_random_forest(X, y, thresholds=[0.3, 0.4, 0.5, 0.6, 0.7], nu
     return avg_results, best_threshold
 
 
-def crossvalidation_logistic_regression(X, y, thresholds=[0.3, 0.4, 0.5, 0.6, 0.7], num_folds=5):
-    """
-    Performs cross-validation for logistic regression models with different thresholds.
-
-    Args:
-        X (np.ndarray): The feature matrix.
-        y (pd.DataFrame): The target labels.
-        thresholds (list): A list of thresholds to evaluate.
-
-    Returns:
-        dict: A dictionary mapping each threshold to its corresponding evaluation metrics.
-    """
-    skf = StratifiedKFold(n_splits=num_folds)
+def objective(trial):
+    # Suggest one threshold per label (bounded)
+    thresholds = np.array([
+        trial.suggest_float(f"thr_{i}", 0.3, 0.7)
+        for i in range(8)
+    ], dtype=float)
+    # skf
+    skf = StratifiedKFold(n_splits=5)
     results = {thr: [] for thr in thresholds}
-    for train_index, test_index in skf.split(X, y.argmax(axis=1)):
-        X_train, X_test = X[train_index], X[test_index]
-        y_train, y_test = y[train_index], y[test_index]
-
-        for thr in thresholds:
-            models, preds, true_lbls = logistic_regression_by_label(
-                X_train, y_train, threshold=thr)
-            metrics = compute_metrics(true_lbls, preds)
-            results[thr].append(metrics)
-
-    avg_results = {}
-    for thr in thresholds:
-        avg_metrics = {
-            'precision': np.mean([res['precision'] for res in results[thr]]),
-            'recall': np.mean([res['recall'] for res in results[thr]]),
-            'f1_score': np.mean([res['f1_score'] for res in results[thr]]),
-            'hamming_loss': np.mean([res['hamming_loss'] for res in results[thr]])
-        }
-        avg_results[thr] = avg_metrics
-    best_threshold = min(
-        avg_results, key=lambda k: avg_results[k]['hamming_loss'])
-    return avg_results, best_threshold
 
 
 def get_embeddings_glove(words, model):

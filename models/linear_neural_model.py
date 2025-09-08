@@ -140,18 +140,24 @@ def main():
     df["text_embeddings"] = df["cleaned_text"].apply(
         lambda x: get_bert_text_embedding(x, tokenizer, model, top_k=5))
     # applying embedding function to the code snippets
-    # tokenizer = AutoTokenizer.from_pretrained("microsoft/codebert-base")
-    # model = AutoModel.from_pretrained("microsoft/codebert-base")
-    # df["code_embeddings"] = df["source_code"].apply(
-    #     lambda x: get_code_embedding(x, tokenizer, model))
+    tokenizer = AutoTokenizer.from_pretrained("microsoft/codebert-base")
+    model = AutoModel.from_pretrained("microsoft/codebert-base")
+    df["code_embeddings"] = df["source_code"].apply(
+        lambda x: get_code_embedding(x, tokenizer, model))
+    # save the dafaframe into a csv
+    df.to_csv("data/processed_dataset_with_embeddings.csv", index=False)
     # flattening the embeddings
-    X = np.array([emb.flatten() for emb in df["text_embeddings"].tolist()])
+    X_text = np.array([emb.flatten()
+                      for emb in df["text_embeddings"].tolist()])
+    X_code = np.array([emb.flatten()
+                      for emb in df["code_embeddings"].tolist()])
+    X = np.concatenate([X_text, X_code], axis=1)
     print("Feature matrix shape:", X.shape)
     y = np.array(df["binary_tags"].tolist())
     model = LinearNeuralModel(
         input_dim=X.shape[1], output_dim=y.shape[1]).to(DEVICE)
     trained_model, metrics = train_model(
-        model, X, y, threshold=0.5, num_epochs=100, batch_size=16, learning_rate=0.001, train_split=0.8)
+        model, X, y, threshold=0.5, num_epochs=200, batch_size=32, learning_rate=0.001, train_split=0.8)
 
 
 if __name__ == "__main__":
