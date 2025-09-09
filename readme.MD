@@ -94,4 +94,4 @@ Please enter the source code snippet:
 def shortest_path(graph): ...
 Predicted tags (Hard Voting):
 ['graphs', 'math']
-Inference time: 0.1567 seconds
+Inference time: 6.54 seconds
