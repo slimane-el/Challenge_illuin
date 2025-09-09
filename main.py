@@ -96,7 +96,7 @@ def main():
             len(valid_tags)) if preds_nn[i] == 1]
         print(predicted_tags)
     else:  # hard voting
-        final_preds = ((preds_lr + preds_nn) > 1).astype(int)
+        final_preds = ((preds_lr + preds_nn) >= 1).astype(int)
         print("Predicted tags (Hard Voting):")
         predicted_tags = [valid_tags[i] for i in range(
             len(valid_tags)) if final_preds[i] == 1]
