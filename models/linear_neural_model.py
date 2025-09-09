@@ -1,6 +1,8 @@
 import torch
 from src.utils import build_dataset, clean_text
+import optuna
 from transformers import AutoTokenizer, AutoModel
+from sklearn.model_selection import train_test_split
 import torch.nn as nn
 from sklearn.metrics.pairwise import cosine_similarity
 import nltk
@@ -116,6 +118,18 @@ def get_bert_text_embedding(text, tokenizer, model, top_k=5):
     return concatenated_embedding.cpu().numpy()
 
 
+def trial_objective(trial, model, X_validation, y_validation):
+    # Suggest one threshold per label (bounded)
+    thresholds = np.array([
+        trial.suggest_float(f"thr_{i}", 0.3, 0.7)
+        for i in range(8)
+    ], dtype=float)
+    # no need to retrain model, only compute metrics
+    metrics = compute_metrics(y_validation, (model(torch.tensor(X_validation, dtype=torch.float32).to(
+        DEVICE)).cpu().detach().numpy() >= thresholds).astype(int))
+    return metrics['hamming_loss']
+
+
 def main():
     # Load dataset
     folder_path = 'data/code_classification_dataset'
@@ -144,8 +158,6 @@ def main():
     model = AutoModel.from_pretrained("microsoft/codebert-base")
     df["code_embeddings"] = df["source_code"].apply(
         lambda x: get_code_embedding(x, tokenizer, model))
-    # save the dafaframe into a csv
-    df.to_csv("data/processed_dataset_with_embeddings.csv", index=False)
     # flattening the embeddings
     X_text = np.array([emb.flatten()
                       for emb in df["text_embeddings"].tolist()])
@@ -154,10 +166,32 @@ def main():
     X = np.concatenate([X_text, X_code], axis=1)
     print("Feature matrix shape:", X.shape)
     y = np.array(df["binary_tags"].tolist())
+    # split into train and test
+    X_train, X_validation, y_train, y_validation = train_test_split(
+        X, y, test_size=0.1, random_state=42, stratify=y.argmax(axis=1))
     model = LinearNeuralModel(
         input_dim=X.shape[1], output_dim=y.shape[1]).to(DEVICE)
     trained_model, metrics = train_model(
-        model, X, y, threshold=0.5, num_epochs=200, batch_size=32, learning_rate=0.001, train_split=0.8)
+        model, X_train, y_train, threshold=0.5, num_epochs=100, batch_size=32, learning_rate=0.001, train_split=0.9)
+    # hyperparameter tuning for thresholds using optuna
+    study = optuna.create_study(direction="minimize")
+    study.optimize(lambda trial: trial_objective(
+        trial, trained_model, X_validation, y_validation), n_trials=150)
+    print("Best trial:")
+    trial = study.best_trial
+    print("  Value: {}".format(trial.value))
+    print("  Params: ")
+    for key, value in trial.params.items():
+        print("    {}: {}".format(key, value))
+    best_thresholds = np.array([trial.params[f"thr_{i}"] for i in range(8)])
+    print("Best thresholds:", best_thresholds)
+    # save the neural model and vectorizer model
+    if not os.path.exists('models'):
+        os.makedirs('models')
+    torch.save(trained_model.state_dict(), 'models/linear_neural_model.pth')
+    # save the thresholds also as a csv
+    np.savetxt('models/best_thresholds_nn.csv',
+               best_thresholds, delimiter=',')
 
 
 if __name__ == "__main__":

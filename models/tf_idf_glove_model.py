@@ -1,4 +1,5 @@
 from src.utils import build_dataset, clean_text
+import joblib
 import os
 import optuna
 import nltk
@@ -36,7 +37,7 @@ def get_top_n_tf_idf(corpus, n=5):
         sorted_indices = np.argsort(row.toarray()).flatten()[::-1]
         top_n = [feature_names[idx] for idx in sorted_indices[:n]]
         top_n_keywords.append(top_n)
-    return tf_idf_matrix, top_n_keywords
+    return vectorizer, top_n_keywords
 
 
 def get_glove_embeddings(words, model):
@@ -68,7 +69,7 @@ def compute_metrics(true_labels, predictions):
         predictions (np.ndarray): The predicted binary labels.
 
     Returns:
-        dict: A dictionary containing precision, recall, and F1-score.
+        dict: A dictionary containing precision, recall, and F1-score per class, and hamming loss.
     """
     precision = precision_score(
         true_labels, predictions, average='micro', zero_division=0)
@@ -84,7 +85,7 @@ def compute_metrics(true_labels, predictions):
     }
 
 
-def logistic_regression_by_label(X, y, threshold=0.5):
+def logistic_regression_by_label(X, y, threshold, X_train, X_test, y_train, y_test):
     """
     Trains a logistic regression model for each unique label in the dataset using a threshold approach.
 
@@ -99,8 +100,6 @@ def logistic_regression_by_label(X, y, threshold=0.5):
     models = {}
     all_predictions = []
     all_true_labels = []
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42)
     for i in range(num_classes):
         model = LogisticRegression()
         model.fit(X_train, y_train[:, i])
@@ -112,74 +111,7 @@ def logistic_regression_by_label(X, y, threshold=0.5):
     return models, all_predictions, all_true_labels
 
 
-def random_forest_by_label(X, y, threshold=0.5):
-    """
-    Trains a random forest model for each unique label in the dataset using a threshold approach.
-
-    Args:
-        X (np.ndarray): The feature matrix.
-        y (pd.Series): The target labels.
-
-    Returns:
-        dict: A dictionary mapping each label to its corresponding trained random forest model.
-    """
-    from sklearn.ensemble import RandomForestClassifier
-    num_classes = y.shape[1]
-    models = {}
-    all_predictions = []
-    all_true_labels = []
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42)
-    for i in range(num_classes):
-        model = RandomForestClassifier()
-        model.fit(X_train, y_train[:, i])
-        models[i] = model
-        proba = model.predict_proba(X_test)[:, 1]
-        predictions = (proba >= threshold).astype(int)
-        all_predictions.append(predictions)
-        all_true_labels.append(y_test[:, i])
-    return models, all_predictions, all_true_labels
-
-
-def crossvalidation_random_forest(X, y, thresholds=[0.3, 0.4, 0.5, 0.6, 0.7], num_folds=5):
-    """
-    Performs cross-validation for random forest models with different thresholds.
-
-    Args:
-        X (np.ndarray): The feature matrix.
-        y (pd.DataFrame): The target labels.
-        thresholds (list): A list of thresholds to evaluate.
-
-    Returns:
-        dict: A dictionary mapping each threshold to its corresponding evaluation metrics.
-    """
-    skf = StratifiedKFold(n_splits=num_folds)
-    results = {thr: [] for thr in thresholds}
-    for train_index, test_index in skf.split(X, y.argmax(axis=1)):
-        X_train, X_test = X[train_index], X[test_index]
-        y_train, y_test = y[train_index], y[test_index]
-
-        for thr in thresholds:
-            models, preds, true_lbls = random_forest_by_label(
-                X_train, y_train, threshold=thr)
-            metrics = compute_metrics(true_lbls, preds)
-            results[thr].append(metrics)
-
-    avg_results = {}
-    for thr in thresholds:
-        avg_metrics = {
-            'precision': np.mean([res['precision'] for res in results[thr]]),
-            'recall': np.mean([res['recall'] for res in results[thr]]),
-            'f1_score': np.mean([res['f1_score'] for res in results[thr]]),
-            'hamming_loss': np.mean([res['hamming_loss'] for res in results[thr]])
-        }
-        avg_results[thr] = avg_metrics
-    best_threshold = min(
-        avg_results, key=lambda k: avg_results[k]['hamming_loss'])
-    return avg_results, best_threshold
-
-
-def objective(trial):
+def objective(trial, X, y):
     # Suggest one threshold per label (bounded)
     thresholds = np.array([
         trial.suggest_float(f"thr_{i}", 0.3, 0.7)
@@ -187,17 +119,23 @@ def objective(trial):
     ], dtype=float)
     # skf
     skf = StratifiedKFold(n_splits=5)
-    results = {thr: [] for thr in thresholds}
+    fold_metrics = []
+    for train_index, test_index in skf.split(X, y.argmax(axis=1)):
+        X_train, X_test = X[train_index], X[test_index]
+        y_train, y_test = y[train_index], y[test_index]
 
-
-def get_embeddings_glove(words, model):
-    embeddings = []
-    for word in words:
-        if word in model.wv:
-            embeddings.append(model.wv[word])
-        else:
-            embeddings.append(np.zeros(model.vector_size))
-    return np.array(embeddings)
+        models, preds, true_lbls = logistic_regression_by_label(
+            X_train, y_train, threshold=thresholds, X_train=X_train, X_test=X_test, y_train=y_train, y_test=y_test)
+        metrics = compute_metrics(true_lbls, preds)
+        fold_metrics.append(metrics)
+    # Average across folds
+    avg_metrics = {
+        'precision': np.mean([m['precision'] for m in fold_metrics]),
+        'recall': np.mean([m['recall'] for m in fold_metrics]),
+        'f1_score': np.mean([m['f1_score'] for m in fold_metrics]),
+        'hamming_loss': np.mean([m['hamming_loss'] for m in fold_metrics]),
+    }
+    return avg_metrics['hamming_loss']
 
 
 def main():
@@ -226,7 +164,7 @@ def main():
     model = word2vec.Word2Vec(
         sentences, vector_size=25, window=5, min_count=1, sg=1, epochs=10)
     # TF-IDF and GloVe embeddings
-    tf_idf_matrix, top_keywords = get_top_n_tf_idf(corpus, n=5)
+    vectorizer, top_keywords = get_top_n_tf_idf(corpus, n=5)
     df["keywords"] = top_keywords
     df["embeddings"] = df["keywords"].apply(
         lambda words: get_glove_embeddings(words, model))
@@ -234,11 +172,39 @@ def main():
     X = np.array([emb.flatten() for emb in df["embeddings"]])
     print("Feature matrix shape:", X.shape)
     y = np.array(df["binary_tags"].tolist())
+    # split data into train and test
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y.argmax(axis=1))
     # Cross-validation and model evaluation
-    results, best_threshold = crossvalidation_random_forest(
-        X, y, num_folds=5)
-    print("Cross-validation results:", results)
-    print("Best threshold based on Hamming Loss:", best_threshold)
+    study = optuna.create_study(direction="minimize")
+    study.optimize(lambda trial: objective(
+        trial, X_train, y_train), n_trials=200)
+    print("Best trial:")
+    trial = study.best_trial
+    print("  Value: {}".format(trial.value))
+    print("  Params: ")
+    for key, value in trial.params.items():
+        print("    {}: {}".format(key, value))
+    best_thresholds = np.array([trial.params[f"thr_{i}"] for i in range(8)])
+    print("Best thresholds:", best_thresholds)
+    # print final metrics on the test set
+    models, preds, true_lbls = logistic_regression_by_label(
+        X, y, threshold=best_thresholds, X_train=X_train, X_test=X_test, y_train=y_train, y_test=y_test)
+    final_metrics = compute_metrics(true_lbls, preds)
+    print("Final metrics on the test set:", final_metrics)
+    # save the word2vec model and vectorizer model
+    if not os.path.exists('models'):
+        os.makedirs('models')
+    model.save('models/glove_word2vec.model')
+    joblib.dump(vectorizer, 'models/tfidf_vectorizer.pkl')
+    # train final models on theentire dataset
+    logistic_models, preds, true_lbls = logistic_regression_by_label(
+        X, y, threshold=best_thresholds, X_train=X, X_test=X, y_train=y, y_test=y)
+    # save logistic models
+    joblib.dump(logistic_models, 'models/logistic_models.pkl')
+    # save best_threshholds also as a csv
+    np.savetxt('models/best_thresholds_lr.csv',
+               best_thresholds, delimiter=',')
 
 
 if __name__ == "__main__":
