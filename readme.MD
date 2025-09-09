@@ -78,3 +78,20 @@ venv\Scripts\activate     # Windows
 # Install dependencies
 pip install -r requirements.txt
 ```
+
+## How to execute code
+
+$ python main.py
+Inference script, do you wanna use logistic regression or neural network model, or a hard vote model combining the two?(lr,nn,hv)
+hv
+Please enter the problem description:
+Find the shortest path in a weighted graph.
+Please enter the problem input specification:
+Graph edges with weights
+Please enter the problem output specification:
+Distance of shortest path
+Please enter the source code snippet:
+def shortest_path(graph): ...
+Predicted tags (Hard Voting):
+['graphs', 'math']
+Inference time: 0.1567 seconds
