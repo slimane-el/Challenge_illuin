@@ -17,10 +17,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def main():
     valid_tags = ['math', 'graphs', 'strings', 'number theory',
                   'trees', 'geometry', 'games', 'probabilities']
-    print("Inference script, do you wanna use logistic regression or neural network model, or a hard vote model combining the two?(lr,nn,hv)")
+    print("Inference script, do you wanna use logistic regression or neural network model, or a soft vote model combining the two?(lr,nn,sv)")
     model_type = input().strip().lower()
-    if model_type not in ['lr', 'nn', 'hv']:
-        print("Invalid input. Please enter 'lr', 'nn', or 'hv'.")
+    if model_type not in ['lr', 'nn', 'sv']:
+        print("Invalid input. Please enter 'lr', 'nn', or 'sv'.")
         return
     print("Please enter the problem description:")
     problem_description = input().strip()
@@ -31,13 +31,13 @@ def main():
     text_input = problem_description + " " + \
         problem_input_spec + " " + problem_output_spec
     cleaned_text = clean_text(text_input)
-    if model_type in ['nn', 'hv']:
+    if model_type in ['nn', 'sv']:
         print("Please enter the source code snippet:")
         source_code = input().strip()
     # print inference time
     start_time = time.time()
     # load the models
-    if model_type in ['lr', 'hv']:
+    if model_type in ['lr', 'sv']:
         lemmatizer = nltk.WordNetLemmatizer()
         cleaned_text_lemmatized = ' '.join([lemmatizer.lemmatize(word)
                                             for word in cleaned_text.split()])
@@ -61,7 +61,7 @@ def main():
         probs_lr = np.array([model.predict_proba(X_lr)[0][1]
                              for model in logistic_models.values()])
         preds_lr = (probs_lr >= best_thresholds_lr).astype(int)
-    if model_type in ['nn', 'hv']:
+    if model_type in ['nn', 'sv']:
         nn_model_dict = torch.load(
             'models/linear_neural_model.pth', map_location=device)
         nn_model = LinearNeuralModel(input_dim=3328, output_dim=8).to(device)
@@ -95,9 +95,9 @@ def main():
         predicted_tags = [valid_tags[i] for i in range(
             len(valid_tags)) if preds_nn[i] == 1]
         print(predicted_tags)
-    else:  # hard voting
-        final_preds = ((preds_lr + preds_nn) >= 1).astype(int)
-        print("Predicted tags (Hard Voting):")
+    else:  # soft voting
+        final_preds = ((probs_lr + probs_nn) >= 1).astype(int)
+        print("Predicted tags (Soft Voting):")
         predicted_tags = [valid_tags[i] for i in range(
             len(valid_tags)) if final_preds[i] == 1]
         print(predicted_tags)
