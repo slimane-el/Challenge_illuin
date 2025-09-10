@@ -67,8 +67,8 @@ Given a dataset of coding problems with multiple tags (e.g., `math`, `graphs`, `
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/code-multilabel-classification.git
-cd code-multilabel-classification
+git clone https://github.com/slimane-el/challenge_illuin.git
+cd challenge_illuin
 
 # Create virtual environment
 python -m venv venv
