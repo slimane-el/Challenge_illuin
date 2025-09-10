@@ -10,12 +10,7 @@ This project implements a **multi-label classification pipeline** for coding pro
 - [Features](#features)
 - [Models](#models)
 - [Installation](#installation)
-- [Usage](#usage)
-- [Training](#training)
-- [Inference](#inference)
-- [Evaluation](#evaluation)
-- [Saving and Loading Models](#saving-and-loading-models)
-- [License](#license)
+- [How to execute inference code]
 
 ---
 
@@ -59,7 +54,6 @@ Given a dataset of coding problems with multiple tags (e.g., `math`, `graphs`, `
 
 3. **Voting Ensemble**
    - Hard voting: label predicted if threshold number of models agree
-   - Soft voting: average predicted probabilities per label
 
 ---
 
